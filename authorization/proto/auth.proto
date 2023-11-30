@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package auth;
+option go_package = "auth";
+
+message FindIdRequest {
+  string sid = 1;
+}
+
+message FindIdResponse {
+  int64 value = 1;
+}
+
+message IdsAndPathsListRequest {}
+
+message IdsAndPathsResponse {
+  repeated int64 ids = 1;
+  repeated string paths = 2;
+}
+
+message AuthorizationCheckRequest {
+  string sid = 1; 
+}
+
+message AuthorizationCheckResponse {
+  bool status = 1; 
+}
+
+
+service Authorization {
+  rpc GetId(FindIdRequest) returns (FindIdResponse) {}
+  rpc GetIdsAndPaths(IdsAndPathsListRequest) returns (IdsAndPathsResponse) {}
+  rpc GetAuthorizationStatus(AuthorizationCheckRequest) returns (AuthorizationCheckResponse) {}
+}

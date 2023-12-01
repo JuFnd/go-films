@@ -24,9 +24,7 @@ type ICore interface {
 	GetActorInfo(actorId uint64) (*requests.ActorResponse, error)
 	GetActorsCareer(actorId uint64) ([]models.ProfessionItem, error)
 	GetGenre(genreId uint64) (string, error)
-	FindFilm(title string, dateFrom string, dateTo string,
-		ratingFrom float32, ratingTo float32, mpaa string, genres []string, actors []string,
-	) ([]models.FilmItem, error)
+	FindFilm(title string, dateFrom string, dateTo string, ratingFrom float32, ratingTo float32, mpaa string, genres []string, actors []string) ([]models.FilmItem, error)
 	FavoriteFilms(userId uint64) ([]models.FilmItem, error)
 	FavoriteFilmsAdd(userId uint64, filmId uint64) error
 	FavoriteFilmsRemove(userId uint64, filmId uint64) error
@@ -53,13 +51,64 @@ func GetCore(cfg_sql *configs.DbDsnCfg, lg *slog.Logger, films film.IFilmsRepo, 
 	return &core
 }
 
-func (core *Core) FindFilm(title string, dateFrom string, dateTo string,
-	ratingFrom float32, ratingTo float32, mpaa string, genres []string, actors []string,
-) ([]models.FilmItem, error) {
-	films, err := core.films.FindFilm(title, dateFrom, dateTo, ratingFrom, ratingTo, mpaa, genres, actors)
-	if err != nil {
-		core.lg.Error("find film error", "err", err.Error())
-		return nil, fmt.Errorf("find film err: %w", err)
+func (core *Core) FindFilm(title string, dateFrom string, dateTo string, ratingFrom float32, ratingTo float32, mpaa string, genres []string, actors []string) ([]models.FilmItem, error) {
+	var films []models.FilmItem
+	var err error
+
+	results := make(map[string][]models.FilmItem)
+
+	if title != "" {
+		results["title"], err = core.films.FindByTitleFilm(title)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if dateFrom != "" && dateTo != "" {
+		results["date"], err = core.films.FindByDateFilm(dateFrom, dateTo)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if ratingFrom != 0 || ratingTo != 0 {
+		results["rating"], err = core.films.FindByRatingFilm(float64(ratingFrom), float64(ratingTo))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(genres) > 0 {
+		results["genres"], err = core.films.FindByGenresFilm(genres)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(actors) > 0 {
+		results["actors"], err = core.films.FindByActorsFilm(actors)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Combine results from different slices
+	combinedResults := make(map[uint64]int)
+	for _, filmsSlice := range results {
+		for _, film := range filmsSlice {
+			combinedResults[film.Id]++
+		}
+	}
+
+	// Retrieve films based on the combined IDs
+	for id, count := range combinedResults {
+		if count == len(results) {
+			film, err := core.films.GetFilm(id)
+			if err != nil {
+				return nil, err
+			}
+			films = append(films, *film)
+		}
 	}
 
 	return films, nil

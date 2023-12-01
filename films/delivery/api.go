@@ -3,6 +3,7 @@ package delivery
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -57,6 +58,53 @@ func (a *API) Films(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pageStr := r.URL.Query().Get("page")
+	page, err := strconv.ParseUint(pageStr, 10, 64)
+	if err != nil || page == 0 {
+		page = 1
+	}
+
+	pageSizeStr := r.URL.Query().Get("page_size")
+	pageSize, err := strconv.ParseUint(pageSizeStr, 10, 64)
+	if err != nil || pageSize == 0 {
+		pageSize = 8
+	}
+
+	genreIdStr := r.URL.Query().Get("collection_id")
+	genreId, err := strconv.ParseUint(genreIdStr, 10, 64)
+	if err != nil {
+		genreId = 0
+	}
+
+	films, genre, err := a.core.GetFilmsAndGenreTitle(genreId, uint64((page-1)*pageSize), pageSize)
+	if err != nil {
+		a.lg.Error("get films error", "err", err.Error())
+		response.Status = http.StatusInternalServerError
+		requests.SendResponse(w, response, a.lg)
+		return
+	}
+
+	filmsResponse := requests.FilmsResponse{
+		Page:           page,
+		PageSize:       pageSize,
+		Total:          uint64(len(films)),
+		CollectionName: genre,
+		Films:          films,
+	}
+	response.Body = filmsResponse
+
+	requests.SendResponse(w, response, a.lg)
+}
+
+func (a *API) FindFilms(w http.ResponseWriter, r *http.Request) {
+	response := requests.Response{Status: http.StatusOK, Body: nil}
+
+	if r.Method != http.MethodGet {
+		response.Status = http.StatusMethodNotAllowed
+		requests.SendResponse(w, response, a.lg)
+		return
+	}
+
 	title := r.URL.Query().Get("title")
 	dateFrom := r.URL.Query().Get("date_from")
 	dateTo := r.URL.Query().Get("date_to")
@@ -65,6 +113,8 @@ func (a *API) Films(w http.ResponseWriter, r *http.Request) {
 	mpaa := r.URL.Query().Get("mpaa")
 	genres := strings.Split(r.URL.Query().Get("genre"), ",")
 	actors := strings.Split(r.URL.Query().Get("actors"), ",")
+
+	fmt.Println(title, actors, dateFrom, dateTo, ratingFromStr, ratingToStr, mpaa, genres, actors)
 
 	var ratingFrom, ratingTo float32
 	var err error

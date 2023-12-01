@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/go-park-mail-ru/2023_2_Vkladyshi/configs"
@@ -20,10 +19,14 @@ type IFilmsRepo interface {
 	GetFilms(start uint64, end uint64) ([]models.FilmItem, error)
 	GetFilm(filmId uint64) (*models.FilmItem, error)
 	GetFilmRating(filmId uint64) (float64, uint64, error)
-	FindFilm(title string, dateFrom string, dateTo string, ratingFrom float32, ratingTo float32, mpaa string, genres []string, actors []string) ([]models.FilmItem, error)
 	GetFavoriteFilms(userId uint64) ([]models.FilmItem, error)
 	AddFavoriteFilm(userId uint64, filmId uint64) error
 	RemoveFavoriteFilm(userId uint64, filmId uint64) error
+	FindByActorsFilm(actors []string) ([]models.FilmItem, error)
+	FindByGenresFilm(genres []string) ([]models.FilmItem, error)
+	FindByRatingFilm(ratingFrom float64, ratingTo float64) ([]models.FilmItem, error)
+	FindByDateFilm(dateFrom string, dateTo string) ([]models.FilmItem, error)
+	FindByTitleFilm(title string) ([]models.FilmItem, error)
 }
 
 type RepoPostgre struct {
@@ -83,61 +86,6 @@ func (repo *RepoPostgre) GetFilmsByGenre(genre uint64, start uint64, end uint64)
 		err := rows.Scan(&post.Id, &post.Title, &post.Poster)
 		if err != nil {
 			return nil, fmt.Errorf("GetFilmsByGenre scan err: %w", err)
-		}
-		films = append(films, post)
-	}
-
-	return films, nil
-}
-
-func (repo *RepoPostgre) FindFilmByFilters(title string, dateFrom string, dateTo string,
-	ratingFrom float32, ratingTo float32, mpaa string, genres []string, actors []string,
-) ([]models.FilmItem, error) {
-
-	films := []models.FilmItem{}
-	var s strings.Builder
-	s.WriteString(
-		"SELECT DISTINCT film.title, film.id, film.poster, AVG(users_comment.rating) FROM film " +
-			"JOIN films_genre ON film.id = films_genre.id_film " +
-			"JOIN genre ON genre.id = films_genre.id_genre " +
-			"JOIN users_comment ON film.id = users_comment.id_film " +
-			"JOIN person_in_film ON film.id = person_in_film.id_film " +
-			"JOIN crew ON person_in_film.id_person = crew.id WHERE ")
-	if title != "" {
-		s.WriteString("fts @@ to_tsquery($5) AND ")
-	}
-	if dateFrom != "" {
-		s.WriteString("release_date >= '$6' AND ")
-	}
-	if dateTo != "" {
-		s.WriteString("release_date <= '$7' AND ")
-	}
-	if mpaa != "" {
-		s.WriteString("mpaa = $8 AND ")
-	}
-	s.WriteString(
-		"(CASE WHEN array_length($1::varchar[], 1)> 0 " +
-			"THEN genre.title = ANY ($1::varchar[]) ELSE TRUE END) AND (CASE " +
-			"WHEN array_length($2::varchar[], 1)> 0 " +
-			"THEN crew.name = ANY ($2::varchar[]) ELSE TRUE END) " +
-
-			"GROUP BY film.title, film.id, genre.title " +
-			"HAVING AVG(users_comment.rating) > $3 AND AVG(users_comment.rating) < $4 " +
-			"ORDER BY film.title")
-
-	rows, err := repo.db.Query(s.String(),
-		pq.Array(genres), pq.Array(actors), ratingFrom, ratingTo, title, dateFrom, dateTo, mpaa)
-
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("find film err: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		post := models.FilmItem{}
-		err := rows.Scan(&post.Title, &post.Id, &post.Poster, &post.Rating)
-		if err != nil {
-			return nil, fmt.Errorf("find film scan err: %w", err)
 		}
 		films = append(films, post)
 	}
@@ -208,56 +156,132 @@ func (repo *RepoPostgre) GetFilmRating(filmId uint64) (float64, uint64, error) {
 	return rating.Float64, uint64(number.Int64), nil
 }
 
-func (repo *RepoPostgre) FindFilm(title string, dateFrom string, dateTo string,
-	ratingFrom float32, ratingTo float32, mpaa string, genres []string, actors []string,
-) ([]models.FilmItem, error) {
-
-	films := []models.FilmItem{}
-	var s strings.Builder
-	s.WriteString(
-		"SELECT DISTINCT film.title, film.id, film.poster, AVG(users_comment.rating) FROM film " +
-			"JOIN films_genre ON film.id = films_genre.id_film " +
-			"JOIN genre ON genre.id = films_genre.id_genre " +
-			"JOIN users_comment ON film.id = users_comment.id_film " +
-			"JOIN person_in_film ON film.id = person_in_film.id_film " +
-			"JOIN crew ON person_in_film.id_person = crew.id WHERE ")
-	if title != "" {
-		s.WriteString("fts @@ to_tsquery($5) AND ")
-	}
-	if dateFrom != "" {
-		s.WriteString("release_date >= '$6' AND ")
-	}
-	if dateTo != "" {
-		s.WriteString("release_date <= '$7' AND ")
-	}
-	if mpaa != "" {
-		s.WriteString("mpaa = $8 AND ")
-	}
-	s.WriteString(
-		"(CASE WHEN array_length($1::varchar[], 1)> 0 " +
-			"THEN genre.title = ANY ($1::varchar[]) ELSE TRUE END) AND (CASE " +
-			"WHEN array_length($2::varchar[], 1)> 0 " +
-			"THEN crew.name = ANY ($2::varchar[]) ELSE TRUE END) " +
-
-			"GROUP BY film.title, film.id, genre.title " +
-			"HAVING AVG(users_comment.rating) > $3 AND AVG(users_comment.rating) < $4 " +
-			"ORDER BY film.title")
-
-	rows, err := repo.db.Query(s.String(),
-		pq.Array(genres), pq.Array(actors), ratingFrom, ratingTo, title, dateFrom, dateTo, mpaa)
-
+func (repo *RepoPostgre) FindByActorsFilm(actors []string) ([]models.FilmItem, error) {
+	query := `
+		SELECT film.id, film.title, film.poster
+		FROM film
+		JOIN person_in_film ON film.id = person_in_film.id_film
+		JOIN crew ON person_in_film.id_person = crew.id
+		WHERE crew.name = ANY($1)
+	`
+	rows, err := repo.db.Query(query, pq.Array(actors))
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("find film err: %w", err)
+		return nil, fmt.Errorf("find by actors film error: %w", err)
 	}
 	defer rows.Close()
 
+	var films []models.FilmItem
 	for rows.Next() {
-		post := models.FilmItem{}
-		err := rows.Scan(&post.Title, &post.Id, &post.Poster, &post.Rating)
+		var film models.FilmItem
+		err := rows.Scan(&film.Id, &film.Title, &film.Poster)
 		if err != nil {
-			return nil, fmt.Errorf("find film scan err: %w", err)
+			return nil, fmt.Errorf("find by actors film scan error: %w", err)
 		}
-		films = append(films, post)
+		films = append(films, film)
+	}
+
+	return films, nil
+}
+
+func (repo *RepoPostgre) FindByGenresFilm(filmGenres []string) ([]models.FilmItem, error) {
+	query := `
+		SELECT film.id, film.title, film.poster
+		FROM film
+		JOIN films_genre ON film.id = films_genre.id_film
+		JOIN genre ON genre.id = films_genre.id_genre
+		WHERE genre.title = ANY($1)
+	`
+	rows, err := repo.db.Query(query, pq.Array(filmGenres))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("find by genres film error: %w", err)
+	}
+	defer rows.Close()
+
+	var films []models.FilmItem
+	for rows.Next() {
+		var film models.FilmItem
+		err := rows.Scan(&film.Id, &film.Title, &film.Poster)
+		if err != nil {
+			return nil, fmt.Errorf("find by genres film scan error: %w", err)
+		}
+		films = append(films, film)
+	}
+
+	return films, nil
+}
+
+func (repo *RepoPostgre) FindByRatingFilm(ratingFrom float64, ratingTo float64) ([]models.FilmItem, error) {
+	query := `
+		SELECT film.id, film.title, film.poster
+		FROM film
+		JOIN users_comment ON film.id = users_comment.id_film
+		GROUP BY film.id
+		HAVING AVG(users_comment.rating) >= $1 AND AVG(users_comment.rating) <= $2
+	`
+	rows, err := repo.db.Query(query, ratingFrom, ratingTo)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("find by rating film error: %w", err)
+	}
+	defer rows.Close()
+
+	var films []models.FilmItem
+	for rows.Next() {
+		var film models.FilmItem
+		err := rows.Scan(&film.Id, &film.Title, &film.Poster)
+		if err != nil {
+			return nil, fmt.Errorf("find by rating film scan error: %w", err)
+		}
+		films = append(films, film)
+	}
+
+	return films, nil
+}
+
+func (repo *RepoPostgre) FindByDateFilm(dateFrom string, dateTo string) ([]models.FilmItem, error) {
+	query := `
+		SELECT film.id, film.title, film.poster
+		FROM film
+		WHERE release_date >= $1 AND release_date <= $2
+	`
+	rows, err := repo.db.Query(query, dateFrom, dateTo)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("find by date film error: %w", err)
+	}
+	defer rows.Close()
+
+	var films []models.FilmItem
+	for rows.Next() {
+		var film models.FilmItem
+		err := rows.Scan(&film.Id, &film.Title, &film.Poster)
+		if err != nil {
+			return nil, fmt.Errorf("find by date film scan error: %w", err)
+		}
+		films = append(films, film)
+	}
+
+	return films, nil
+}
+
+func (repo *RepoPostgre) FindByTitleFilm(title string) ([]models.FilmItem, error) {
+	query := `
+		SELECT film.id, film.title, film.poster
+		FROM film
+		WHERE film.title ILIKE '%' || $1 || '%'
+	`
+	rows, err := repo.db.Query(query, title)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("find by title film error: %w", err)
+	}
+	defer rows.Close()
+
+	var films []models.FilmItem
+	for rows.Next() {
+		var film models.FilmItem
+		err := rows.Scan(&film.Id, &film.Title, &film.Poster)
+		if err != nil {
+			return nil, fmt.Errorf("find by title film scan error: %w", err)
+		}
+		films = append(films, film)
 	}
 
 	return films, nil

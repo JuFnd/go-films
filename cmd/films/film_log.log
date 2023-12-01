@@ -1,1 +1,2 @@
-{"time":"2023-11-30T20:21:30.512605697Z","level":"ERROR","msg":"ListenAndServe error","module":"api","err":"listen tcp :8081: bind: address already in use"}
+{"time":"2023-12-01T11:26:04.889885739+03:00","level":"ERROR","msg":"sql ping error","err":"unexpected message type"}
+{"time":"2023-12-01T11:26:04.889964099+03:00","level":"ERROR","msg":"cant create repo"}
